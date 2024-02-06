@@ -2,3 +2,5 @@
 /script
 docker-compose.prod.yaml
 Makefile
+config.toml
+*.json

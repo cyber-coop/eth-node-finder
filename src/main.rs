@@ -4,6 +4,8 @@ use std::time::Duration;
 use std::thread;
 use tokio_postgres::NoTls;
 
+pub mod config;
+
 const BOOTSTRAP_NODES: &[&str] = &[
 	"enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666@18.138.108.67:30303", // bootnode-aws-ap-southeast-1-001
 	"enode://22a8232c3abc76a16ae9d6c3b164f98775fe226f0917b0ca871128a74a8e9630b458460865bab457221f1d448dd9791d24c4e5d88786180ac185df813a68d4de@3.209.45.79:30303",   // bootnode-aws-us-east-1-001
@@ -13,7 +15,17 @@ const BOOTSTRAP_NODES: &[&str] = &[
 
 #[tokio::main]
 async fn main() {
-    let (client, connection) = tokio_postgres::connect("host=postgres user=postgres password=wow dbname=blockchains", NoTls).await.unwrap();
+    let cfg = config::read_config();
+
+    let database_params = format!(
+        "host={} user={} password={} dbname={}",
+        cfg.database.host,
+        cfg.database.user,
+        cfg.database.password,
+        cfg.database.dbname,
+    );
+
+    let (client, connection) = tokio_postgres::connect(&database_params, NoTls).await.unwrap();
     println!("Connection to the database created");
 
     // The connection object performs the actual communication with the database,
@@ -31,7 +43,8 @@ async fn main() {
         address TEXT NOT NULL,
         tcp_port INT,
         udp_port INT,
-        id BYTEA NOT NULL PRIMARY KEY
+        id BYTEA NOT NULL PRIMARY KEY,
+        network_id BIGINT,
       )").await.unwrap();
     client.execute(&statement, &[]).await.unwrap();
 
