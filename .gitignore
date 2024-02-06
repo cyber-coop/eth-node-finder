@@ -1,6 +1,6 @@
 /target
 /script
 docker-compose.prod.yaml
-Makefile
+Makefile.*
 config.toml
 *.json

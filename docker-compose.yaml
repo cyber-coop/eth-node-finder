@@ -9,6 +9,8 @@ services:
     deploy:
       mode: replicated
       replicas: 6
+    volumes:
+      - ./config.toml:/config.toml
 
   postgres:
     image: "postgres:latest"
