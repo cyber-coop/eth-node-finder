@@ -44,7 +44,7 @@ async fn main() {
         tcp_port INT,
         udp_port INT,
         id BYTEA NOT NULL PRIMARY KEY,
-        network_id BIGINT,
+        network_id BIGINT
       )").await.unwrap();
     client.execute(&statement, &[]).await.unwrap();
 
