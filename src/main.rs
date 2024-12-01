@@ -1,10 +1,17 @@
 use discv4::Node;
-use secp256k1::SecretKey;
-use std::time::Duration;
-use std::thread;
 use tokio_postgres::NoTls;
+use secp256k1::SecretKey;
 
+pub mod utils;
+pub mod mac;
+pub mod message;
+pub mod types;
+pub mod errors;
 pub mod config;
+pub mod connection;
+
+#[macro_use]
+extern crate log;
 
 const BOOTSTRAP_NODES: &[&str] = &[
 	"enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666@18.138.108.67:30303", // bootnode-aws-ap-southeast-1-001
@@ -15,40 +22,52 @@ const BOOTSTRAP_NODES: &[&str] = &[
 
 #[tokio::main]
 async fn main() {
+    // init logger
+    env_logger::init();
+
     let cfg = config::read_config();
 
     let database_params = format!(
         "host={} user={} password={} dbname={}",
-        cfg.database.host,
-        cfg.database.user,
-        cfg.database.password,
-        cfg.database.dbname,
+        cfg.database.host, cfg.database.user, cfg.database.password, cfg.database.dbname,
     );
 
-    let (client, connection) = tokio_postgres::connect(&database_params, NoTls).await.unwrap();
-    println!("Connection to the database created");
+    let (postgres_client, connection) = tokio_postgres::connect(&database_params, NoTls)
+        .await
+        .unwrap();
+    info!("Connection to the database created");
 
     // The connection object performs the actual communication with the database,
     // so spawn it off to run on its own.
     tokio::spawn(async move {
         if let Err(e) = connection.await {
-            eprintln!("connection error: {}", e);
+            error!("connection error: {}", e);
         }
     });
 
-    let statement = client.prepare("CREATE SCHEMA IF NOT EXISTS discv4").await.unwrap();
-    client.execute(&statement, &[]).await.unwrap();
+    let statement = postgres_client
+        .prepare("CREATE SCHEMA IF NOT EXISTS discv4")
+        .await
+        .unwrap();
+    postgres_client.execute(&statement, &[]).await.unwrap();
 
-    let statement = client.prepare("CREATE TABLE IF NOT EXISTS discv4.nodes (
+    let statement = postgres_client
+        .prepare(
+            "CREATE TABLE IF NOT EXISTS discv4.nodes (
         address TEXT NOT NULL,
         tcp_port INT,
         udp_port INT,
         id BYTEA NOT NULL PRIMARY KEY,
-        network_id BIGINT
-      )").await.unwrap();
-    client.execute(&statement, &[]).await.unwrap();
+        network_id BIGINT,
+        client TEXT,
+        capabilities JSON
+      )",
+        )
+        .await
+        .unwrap();
+    postgres_client.execute(&statement, &[]).await.unwrap();
 
-    println!("Table created if doesn't exist");
+    info!("Table created if doesn't exist");
 
     let port = 50505;
     let node = Node::new(
@@ -62,19 +81,36 @@ async fn main() {
     .await
     .unwrap();
 
-    let statement = client.prepare("INSERT INTO discv4.nodes VALUES ($1,$2,$3,$4);").await.unwrap();
+    let statement = postgres_client
+        .prepare("INSERT INTO discv4.nodes VALUES ($1,$2,$3,$4,$5,$6, $7);")
+        .await
+        .unwrap();
     loop {
         let target = rand::random();
-        println!("Looking up random target: {}", target);
-        let result = node.lookup(target).await;
+        info!("Looking up random target: {}", target);
+        let records = node.lookup(target).await;
 
-        for entry in result {
-            println!("Found node: {:?}", entry);
-            // we don't check result because we don't care
-            let _ = client.execute(&statement, &[&entry.address.to_string(), &(entry.tcp_port as i32), &(entry.udp_port as i32), &entry.id.as_bytes()]).await;
-        }
+        let _ = futures::future::join_all(records.iter().map(|record| async {
+            let result = connection::connect(record.address, record.tcp_port, record.id.0.to_vec()).await;
 
-        println!("Current nodes: {}", node.num_nodes());
-        thread::sleep(Duration::from_secs(5));
+            let _ = postgres_client
+                .execute(
+                    &statement,
+                    &[
+                        &record.address.to_string(),
+                        &(record.tcp_port as i32),
+                        &(record.udp_port as i32),
+                        &record.id.as_bytes(),
+                        &result.1,
+                        &serde_json::to_value(&result.0).unwrap(),
+                        &result.2,
+
+                    ],
+                )
+                .await;
+
+        })).await;
+
+        info!("Current nodes: {}", node.num_nodes());
     }
 }
