@@ -1,16 +1,9 @@
+use log::{error, info};
 use discv4::Node;
 use tokio_postgres::NoTls;
 use secp256k1::SecretKey;
 
-pub mod utils;
-pub mod mac;
-pub mod message;
-pub mod errors;
-pub mod config;
-pub mod connection;
-
-#[macro_use]
-extern crate log;
+use void::config;
 
 const BOOTSTRAP_NODES: &[&str] = &[
 	"enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666@18.138.108.67:30303", // bootnode-aws-ap-southeast-1-001
@@ -44,20 +37,7 @@ async fn main() {
         }
     });
 
-    postgres_client.execute("CREATE SCHEMA IF NOT EXISTS discv4;", &[]).await.unwrap();
-    postgres_client.execute("CREATE TABLE IF NOT EXISTS discv4.nodes (
-        address TEXT NOT NULL,
-        tcp_port INT,
-        udp_port INT,
-        id BYTEA NOT NULL PRIMARY KEY,
-        network_id BIGINT,
-        client TEXT,
-        capabilities JSON
-      );", &[]).await.unwrap();
-
-    info!("Table created if doesn't exist");
-
-    let port = 50505;
+    let port = 30303;
     let node = Node::new(
         format!("0.0.0.0:{}", port).parse().unwrap(),
         SecretKey::new(&mut secp256k1::rand::thread_rng()),
@@ -69,35 +49,18 @@ async fn main() {
     .await
     .unwrap();
 
-    let statement = postgres_client
-        .prepare("INSERT INTO discv4.nodes VALUES ($1,$2,$3,$4,$5,$6,$7);")
-        .await
-        .unwrap();
+
+    let statement = postgres_client.prepare("INSERT INTO discv4.nodes VALUES ($1,$2,$3,$4);").await.unwrap();
     loop {
         let target = rand::random();
         info!("Looking up random target: {}", target);
-        let records = node.lookup(target).await;
+        let result = node.lookup(target).await;
 
-        let _ = futures::future::join_all(records.iter().map(|record| async {
-            let result = connection::connect(record.address, record.tcp_port, record.id.0.to_vec()).await;
-
-            let _ = postgres_client
-                .execute(
-                    &statement,
-                    &[
-                        &record.address.to_string(),
-                        &(record.tcp_port as i32),
-                        &(record.udp_port as i32),
-                        &record.id.as_bytes(),
-                        &result.1,
-                        &serde_json::to_value(&result.0).unwrap(),
-                        &result.2,
-
-                    ],
-                )
-                .await;
-
-        })).await;
+        for entry in result {
+            info!("Found node: {:?}", entry);
+            // we don't check result because we don't care
+            let _ = postgres_client.execute(&statement, &[&entry.address.to_string(), &(entry.tcp_port as i32), &(entry.udp_port as i32), &entry.id.as_bytes()]).await;
+        }
 
         info!("Current nodes: {}", node.num_nodes());
     }

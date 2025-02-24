@@ -1,19 +1,59 @@
 version: "3.9"
 
 services:
-  node-finder:
+  discv:
     build: .
+    container_name: discv
     depends_on:
       postgres:
         condition: service_healthy
-    deploy:
-      mode: replicated
-      replicas: 6
     volumes:
       - ./config.toml:/config.toml
+    command: discv
+
+  ping:
+    build: .
+    container_name: ping
+    depends_on:
+      postgres:
+        condition: service_healthy
+      discv:
+        condition: service_started
+    volumes:
+      - ./config.toml:/config.toml
+    command: ping
+
+  server:
+    build: .
+    container_name: server
+    depends_on:
+      postgres:
+        condition: service_healthy
+      discv:
+        condition: service_started
+    volumes:
+      - ./config.toml:/config.toml
+    command: server
+    ports:
+      - "0.0.0.0:50505:50505/tcp"
+      - "0.0.0.0:50505:50505/udp"
+
+
+  status:
+    build: .
+    container_name: status
+    depends_on:
+      postgres:
+        condition: service_healthy
+      discv:
+        condition: service_started
+    volumes:
+      - ./config.toml:/config.toml
+    command: status
 
   postgres:
     image: "postgres:latest"
+    container_name: postgres
     ports:
       - "5432:5432"
     environment:
@@ -25,3 +65,5 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
