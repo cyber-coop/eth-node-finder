@@ -3,11 +3,13 @@ use byteorder::{BigEndian, WriteBytesExt, ReadBytesExt};
 use hmac_sha256::{Hash, HMAC};
 use rand_core::{OsRng, RngCore};
 use byteorder::ByteOrder;
-use std::io::prelude::*;
+use secp256k1::Message;
+use std::{io::prelude::*, net::TcpStream};
 use std::thread;
 use std::time::Duration;
 use sha3::{Digest, Keccak256};
 use std::error;
+use secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
 
 use super::mac;
 
@@ -48,7 +50,8 @@ pub fn concat_kdf(key_material: Vec<u8>, key_length: usize) -> Vec<u8> {
 }
 
 pub fn encrypt_message(remote_public: &Vec<u8>, mut data: Vec<u8>, shared_mac_data: &Vec<u8>) -> Vec<u8> {
-    let privkey = k256::SecretKey::random(&mut OsRng);
+    // let privkey = k256::SecretKey::random(&mut OsRng);
+    let privkey = k256::SecretKey::from_slice(&[1_u8; 32]).unwrap();
     let x = ecdh_x(remote_public, &privkey.to_bytes().to_vec());
     let key = concat_kdf(x, 32);
     let e_key = &key[0..16]; // encryption key
@@ -56,7 +59,7 @@ pub fn encrypt_message(remote_public: &Vec<u8>, mut data: Vec<u8>, shared_mac_da
 
     // encrypt
     let mut iv = [0u8; 16];
-    OsRng.fill_bytes(&mut iv);
+    // OsRng.fill_bytes(&mut iv);
 
     let mut cipher = Aes128Ctr64BE::new(e_key.into(), &iv.into());
     cipher.apply_keystream(&mut data);
@@ -143,7 +146,7 @@ pub fn create_auth_eip8(remote_id: &Vec<u8>, private_key: &Vec<u8>, nonce: &Vec<
     let mut rsv_sig = sig.to_vec();
 
     // adding signing id
-    rsv_sig.push(recid.to_i32() as u8);
+    rsv_sig.push(recid.to_i32() as u8); // TODO: maybe the conversion here is not great
 
     // Initialize array with empty vectors
     let sk = k256::ecdsa::SigningKey::from_slice(&private_key).unwrap();
@@ -169,6 +172,62 @@ pub fn create_auth_eip8(remote_id: &Vec<u8>, private_key: &Vec<u8>, nonce: &Vec<
     let init_msg = [shared_mac_data, enrcyped_auth_message].concat();
 
     return init_msg;
+}
+
+pub fn read_auth_eip8(stream: &mut TcpStream) -> Result<(Vec<u8>, Vec<u8>), Box<dyn error::Error>> {
+    let mut buf = [0u8; 2];
+    let _size = stream.read_exact(&mut buf)?;
+
+    let size_expected = buf.as_slice().read_u16::<BigEndian>().unwrap() as usize;
+    let shared_mac_data = &buf[0..2];
+
+    let mut payload = vec![0u8; size_expected.into()];
+    let size = stream.read(&mut payload)?;
+
+    // TODO: better handle this to return an error and have a timeout
+    assert_eq!(size, size_expected);
+
+    Ok((payload, shared_mac_data.to_vec()))
+}
+
+pub fn verify_auth_eip8(
+    payload: &Vec<u8>,
+    shared_mac_data: &Vec<u8>,
+    private_key: &Vec<u8>,
+    ephemeral_privkey: &Vec<u8>,
+) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let decrypted = decrypt_message(payload, shared_mac_data, private_key);
+
+    // decode RPL data
+    let rlp = rlp::Rlp::new(&decrypted);
+    let mut rlp = rlp.into_iter();
+
+    let sig: Vec<u8> = rlp.next().unwrap().as_val().unwrap();
+    let remote_id: Vec<u8> = rlp.next().unwrap().as_val().unwrap();
+    let remote_nonce: Vec<u8> = rlp.next().unwrap().as_val().unwrap();
+
+    let recid = RecoveryId::from_i32(sig[64] as i32).unwrap();
+    let sig = RecoverableSignature::from_compact(&sig[..64], recid).unwrap();
+
+    // Public key is is the id with 04 (uncompressed key) byte in front
+    let remote_public_key : Vec<u8> = [vec![4], remote_id.to_vec()].concat();
+
+    let shared_secret = ecdh_x(&remote_public_key, &private_key);
+
+
+    // XOR remote_public_key and nonce
+    let msg_hash: Vec<u8> = shared_secret
+        .iter()
+        .zip(remote_nonce.iter())
+        .map(|(&x1, &x2)| x1 ^ x2)
+        .collect();
+
+    let msg = Message::from_slice(&msg_hash).unwrap();
+    let remote_ephemeral_public_key = sig.recover(&msg).unwrap().serialize_uncompressed().to_vec();
+
+    let ephemeral_shared_secret = ecdh_x(&remote_ephemeral_public_key,     ephemeral_privkey);
+
+    return (remote_id, remote_nonce, ephemeral_shared_secret);
 }
 
 pub fn create_auth_non_eip8(remote_id: &Vec<u8>, private_key: &Vec<u8>, nonce: &Vec<u8>, ephemeral_privkey: &Vec<u8>, ephemeral_pubkey: &Vec<u8>) -> Vec<u8> {
@@ -222,14 +281,11 @@ pub fn setup_frame(
     nonce: Vec<u8>,
     ephemeral_shared_secret: Vec<u8>,
     remote_data: Vec<u8>,
-    init_msg: Vec<u8>
+    init_msg: Vec<u8>,
+    h_nonce: Vec<u8>,
 ) -> (Aes256Ctr64BE, mac::MAC, Aes256Ctr64BE, mac::MAC) {
-    let nonce_material = [remote_nonce.clone(), nonce.clone()].concat();
-    let mut hasher = Keccak256::new();
-    hasher.update(&nonce_material);
-    let h_nonce = hasher.finalize();
-
     let iv = [0u8; 16];
+
     let mut hasher = Keccak256::new();
     hasher.update(&ephemeral_shared_secret);
     hasher.update(h_nonce);
@@ -250,8 +306,6 @@ pub fn setup_frame(
     
     // The MAC thingy is actually keccak256
 
-    // let remote_data = [shared_mac_data, &payload].concat();
-
     let xor_result: Vec<u8> = mac_secret
         .iter()
         .zip(nonce.iter())
@@ -259,7 +313,6 @@ pub fn setup_frame(
         .collect();
     let mut ingress_mac = mac::MAC::new(mac_secret.to_vec());
     ingress_mac.update(&[xor_result, remote_data].concat());
-
 
     let xor_result: Vec<u8> = mac_secret
         .iter()
@@ -347,7 +400,7 @@ pub fn send_message(msg: Vec<u8>, stream: &mut std::net::TcpStream, egress_mac: 
     stream.flush().unwrap();
 }
 
-pub fn read_message(stream: &mut std::net::TcpStream, ingress_mac: &mut mac::MAC, ingress_aes: &mut Aes256Ctr64BE) -> Result<Vec<u8>, ()>{
+pub fn read_message(stream: &mut std::net::TcpStream, ingress_mac: &mut mac::MAC, ingress_aes: &mut Aes256Ctr64BE) -> Result<Vec<u8>, ()> {
     let mut buf = [0u8; 32];
     let res = stream.read_exact(&mut buf);
 
@@ -394,6 +447,16 @@ pub fn send_eip8_auth_message(
     Ok(())
 }
 
+pub fn send_ack_message(
+    msg: &Vec<u8>,
+    stream: &mut std::net::TcpStream,
+) -> Result<(), Box<dyn error::Error>> {
+    stream.write(&msg)?;
+    stream.flush()?;
+
+    Ok(())
+}
+
 pub fn read_ack_message(
     stream: &mut std::net::TcpStream,
 ) -> Result<(Vec<u8>, Vec<u8>), Box<dyn error::Error>> {
@@ -410,6 +473,35 @@ pub fn read_ack_message(
     assert_eq!(size, size_expected);
 
     Ok((payload, shared_mac_data.to_vec()))
+}
+
+pub fn create_ack(remote_id: &Vec<u8>, nonce: &Vec<u8>, ephemeral_privkey: &Vec<u8>, pad: &Vec<u8>) -> Vec<u8> {
+    let mut ack_message : Vec<u8> = vec![];
+    // Add 04 to the remote ID to get the remote public key
+    let remote_public_key : Vec<u8> = [vec![4], remote_id.to_vec()].concat();
+
+    let ephemeral_signing_key = secp256k1::SecretKey::from_slice(&ephemeral_privkey).unwrap();
+    let secp = secp256k1::Secp256k1::new();
+    let ephemeral_public_key : Vec<u8> = ephemeral_signing_key.public_key(&secp).serialize_uncompressed().to_vec();
+
+    let data = vec![ephemeral_public_key[1..].to_vec(), nonce.to_vec(), vec![0x04]];
+    // Encoded RLP data
+    let encoded_data = rlp::encode_list::<Vec<u8>, _>(&data);
+
+    // Concat padding to the encoded data
+    ack_message.extend(encoded_data.to_vec());
+    /// ack_message.extend(pad);
+
+    let overhead_length = 113;
+    let mut shared_mac_data : Vec<u8> = vec![];
+    shared_mac_data.write_u16::<BigEndian>((ack_message.len() + overhead_length) as u16).unwrap();
+
+    // Encrypt message
+    let enrcyped_ack_message = encrypt_message(&remote_public_key, ack_message, &shared_mac_data);
+
+    let init_msg = [shared_mac_data, enrcyped_ack_message].concat();
+
+    return init_msg;
 }
 
 pub fn handle_ack_message(

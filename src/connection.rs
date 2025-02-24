@@ -4,13 +4,17 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::TcpStream;
 use std::time::Duration;
+use sha3::Keccak256;
+use sha3::Digest;
 
 use crate::utils;
-use crate::types;
 use crate::message;
 
+/// DEPRECATED
+
+
 // We return the capabilities the nework id and the agent string. If something fails we return an arror message.
-pub async fn connect(address: IpAddr, tcp_port: u16, remote_id: Vec<u8>) -> (Option<Vec<types::CapabilityMessage>>, Option<i64>, Option<String>) {
+pub async fn connect(address: IpAddr, tcp_port: u16, remote_id: Vec<u8>) -> (Option<Vec<(String, u32)>>, Option<i64>, Option<String>) {
     // connect to node
     let addr: SocketAddr = format!("{}:{}", address, tcp_port).parse().expect("To be able to parse address");
 
@@ -65,6 +69,10 @@ pub async fn connect(address: IpAddr, tcp_port: u16, remote_id: Vec<u8>) -> (Opt
         utils::handle_ack_message(&payload, &shared_mac_data, &private_key, &ephemeral_privkey);
 
     // Setup Frame
+    let nonce_material = [remote_nonce.clone(), nonce.clone()].concat();
+    let mut hasher = Keccak256::new();
+    hasher.update(&nonce_material);
+    let h_nonce = hasher.finalize().to_vec();
     let remote_data = [shared_mac_data, payload].concat();
     let (mut ingress_aes, mut ingress_mac, mut egress_aes, mut egress_mac) = utils::setup_frame(
         remote_nonce,
@@ -72,6 +80,7 @@ pub async fn connect(address: IpAddr, tcp_port: u16, remote_id: Vec<u8>) -> (Opt
         ephemeral_shared_secret,
         remote_data,
         init_msg,
+        h_nonce,
     );
 
     info!(target: &target, "Received Ack, waiting for Hello");
@@ -96,24 +105,15 @@ pub async fn connect(address: IpAddr, tcp_port: u16, remote_id: Vec<u8>) -> (Opt
 
     // Should be HELLO
     assert_eq!(0x80, uncrypted_body[0]);
-    let payload = rlp::decode::<types::HelloMessage>(&uncrypted_body[1..]);
-
-    if payload.is_err() {
-        warn!(target: &target,
-            "Couldn't read payload",
-        );
-        return (None, None, None);
-    }
-
-    let hello_message = payload.unwrap();
+    let hello_message = message::parse_hello_message(uncrypted_body[1..].to_vec());
     info!("{:?}", &hello_message);
 
     // We need to find the highest eth version it supports
     let mut version = 0;
     for capability in &hello_message.capabilities {
-        if capability.name.0.to_string() == "eth" {
-            if capability.version > version {
-                version = capability.version;
+        if capability.0.to_string() == "eth" {
+            if capability.1 > version {
+                version = capability.1;
             }
         }
     }
@@ -122,7 +122,17 @@ pub async fn connect(address: IpAddr, tcp_port: u16, remote_id: Vec<u8>) -> (Opt
         "Sending HELLO message",
     );
     // Create Hello
-    let hello = message::create_hello_message(&private_key);
+    let secp = secp256k1::Secp256k1::new();
+    let private_key = secp256k1::SecretKey::from_slice(&private_key).unwrap();
+    let hello = message::HelloMessage {
+        protocol_version: message::BASE_PROTOCOL_VERSION,
+        client: String::from("deadbrain corp."),
+        capabilities: vec![("eth".into(), 67), ("eth".into(), 68)],
+        port: 0,
+        id: secp256k1::PublicKey::from_secret_key(&secp, &private_key).serialize_uncompressed()[1..].to_vec(),
+    };
+    
+    let hello = message::create_hello_message(hello);
     utils::send_message(hello, &mut stream, &mut egress_mac, &mut egress_aes);
 
     info!(target: &target,
@@ -132,21 +142,19 @@ pub async fn connect(address: IpAddr, tcp_port: u16, remote_id: Vec<u8>) -> (Opt
     let genesis_hash = [
         212, 229, 103, 64, 248, 118, 174, 248, 192, 16, 184, 106, 64, 213, 245, 103, 69, 161, 24,
         208, 144, 106, 52, 230, 154, 236, 140, 13, 177, 203, 143, 163,
-    ]
-    .to_vec();
-    let head_td = 0;
-    let fork_id = [0x9f3d2254, 0].to_vec();
-    let network_id = 1;
+    ];
+
+    let status = message::Status {
+        version,
+        network_id: 1,
+        td: vec![0],
+        blockhash: genesis_hash.to_vec(),
+        genesis: genesis_hash.to_vec(),
+        fork_id: (vec![159, 61, 34, 84], 0),
+    };
 
     // Send STATUS message
-    let status = message::create_status_message(
-        &version,
-        &genesis_hash,
-        &genesis_hash,
-        &head_td,
-        &fork_id,
-        &network_id,
-    );
+    let status = message::create_status_message(status);
     utils::send_message(status, &mut stream, &mut egress_mac, &mut egress_aes);
 
     info!(target: &target,
@@ -158,7 +166,7 @@ pub async fn connect(address: IpAddr, tcp_port: u16, remote_id: Vec<u8>) -> (Opt
         warn!(target: &target,
             "Time out",
         );
-        return (Some(hello_message.capabilities), None, Some(hello_message.client_version));
+        return (Some(hello_message.capabilities), None, Some(hello_message.client));
     }
     let uncrypted_body = uncrypted_body.unwrap();
     if uncrypted_body[0] == 0x01 {
@@ -169,14 +177,14 @@ pub async fn connect(address: IpAddr, tcp_port: u16, remote_id: Vec<u8>) -> (Opt
             "Disconnect {}",
             hex::encode(&uncrypted_body)
         );
-        return (Some(hello_message.capabilities), None, Some(hello_message.client_version));
+        return (Some(hello_message.capabilities), None, Some(hello_message.client));
     }
-    let network_id = message::parse_status_message(uncrypted_body[1..].to_vec());
+    let status = message::parse_status_message(uncrypted_body[1..].to_vec()).unwrap();
 
     info!(target: &target,
         "networkid = {}",
-        &network_id
+        &status.network_id
     );
 
-    return (Some(hello_message.capabilities), Some(network_id as i64), Some(hello_message.client_version));
+    return (Some(hello_message.capabilities), Some(status.network_id as i64), Some(hello_message.client));
 }
