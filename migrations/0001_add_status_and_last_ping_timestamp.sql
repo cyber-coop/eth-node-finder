@@ -16,7 +16,7 @@ COMMIT;
 -- BEGIN;
 --
 -- ALTER TABLE discv4.nodes
--- DROP COLUMN status;
+-- DROP COLUMN is_online;
 --
 -- ALTER TABLE discv4.nodes
 -- DROP COLUMN last_ping_timestamp;
