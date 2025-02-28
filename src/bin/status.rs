@@ -30,7 +30,6 @@ async fn main() {
         cfg.database.dbname,
     );
 
-
     let (postgres_client, connection) =
         tokio_postgres::connect(&database_params, NoTls).await.unwrap();
 
@@ -40,9 +39,7 @@ async fn main() {
         }
     });
 
-    let records = postgres_client.query("SELECT * FROM discv4.nodes WHERE network_id IS NULL ORDER BY RANDOM();", &[]).await.unwrap();
-
-
+    let records = postgres_client.query("SELECT * FROM discv4.nodes ORDER BY RANDOM();", &[]).await.unwrap();
     let update_statement = postgres_client.prepare("UPDATE discv4.nodes SET network_id = $1, capabilities = $2, client = $3 WHERE id = $4;").await.unwrap();
 
     // TODO: don't delete but have a flag to say not active
@@ -211,12 +208,12 @@ async fn main() {
         let hello = message::HelloMessage {
             protocol_version: message::BASE_PROTOCOL_VERSION,
             client: String::from("deadbrain corp."),
-            capabilities: vec![("eth".into(), 67), ("eth".into(), 68)],
+            capabilities: vec![("eth".into(), 64), ("eth".into(), 65), ("eth".into(), 66), ("eth".into(), 67), ("eth".into(), 68)],
             port: 0,
             id: secp256k1::PublicKey::from_secret_key(&secp, &private_key).serialize_uncompressed()[1..].to_vec(),
         };
         
-        let hello = message::create_hello_message(hello);
+        let payload = message::create_hello_message(hello);
         utils::send_message(payload, &mut stream, &mut egress_mac, &mut egress_aes);
 
         /******************
