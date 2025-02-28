@@ -23,7 +23,7 @@ fn main() {
 
     let timeout_duration = Duration::from_millis(3000);
 
-    for row in client.query("SELECT * FROM discv4.nodes WHERE is_online IS NULL OR (last_ping_timestamp < NOW() - INTERVAL '5 minutes')", &[]).unwrap() {
+    for row in client.query("SELECT * FROM discv4.nodes WHERE last_ping_timestamp IS NULL OR (last_ping_timestamp < NOW() - INTERVAL '5 minutes')", &[]).unwrap() {
         let address: String = row.get(0);
         let tcp_port: i32 = row.get(1);
         let _udp_port: i32 = row.get(2);
@@ -35,25 +35,18 @@ fn main() {
             Ok(_) => {
                 info!("{} on port {} is working", address, tcp_port);
                 if let Err(err) = client.execute(
-                    "UPDATE discv4.nodes SET is_online = $1, last_ping_timestamp = NOW() WHERE address = $2 AND tcp_port = $3",
-                    &[&true, &address, &tcp_port],
+                    "UPDATE discv4.nodes SET last_ping_timestamp = NOW() WHERE address = $1 AND tcp_port = $2",
+                    &[&address, &tcp_port],
                 ) {
                     error!("Failed to update row: {}", err);
                 }
             }
             Err(_) => {
                 error!(
-                    "{} on port {} is NOT WORKING, marking as offline...",
+                    "{} on port {} is NOT WORKING...",
                     address, tcp_port
                 );
-                if let Err(err) = client.execute(
-                    "UPDATE discv4.nodes SET is_online = $1, last_ping_timestamp = NOW() WHERE address = $2 AND tcp_port = $3",
-                    &[&false, &address, &tcp_port],
-                ) {
-                    error!("Failed to update row: {}", err);
-                }
             }
         }
     }
 }
-
