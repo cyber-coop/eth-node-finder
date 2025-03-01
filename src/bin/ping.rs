@@ -1,4 +1,4 @@
-use log::info;
+use log::{error, info};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpStream;
@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tokio::spawn(async move {
         if let Err(e) = connection.await {
-            eprintln!("Connection error: {}", e);
+            error!("Connection error: {}", e);
         }
     });
 
@@ -87,11 +87,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 match timeout(timeout_duration, TcpStream::connect(&socket_address)).await {
                     Ok(Ok(_)) => {
-                        println!("{} on port {} is working", address, tcp_port);
+                        info!("{} on port {} is working", address, tcp_port);
                         Some((address, tcp_port))
                     }
                     Ok(Err(_)) | Err(_) => {
-                        println!("{} on port {} is NOT WORKING...", address, tcp_port);
+                        error!("{} on port {} is NOT WORKING...", address, tcp_port);
                         None
                     }
                 }
