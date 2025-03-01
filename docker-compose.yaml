@@ -38,7 +38,6 @@ services:
       - "0.0.0.0:50505:50505/tcp"
       - "0.0.0.0:50505:50505/udp"
 
-
   status:
     build: .
     container_name: status
@@ -67,3 +66,4 @@ services:
       retries: 5
     volumes:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./migrations:/migrations
