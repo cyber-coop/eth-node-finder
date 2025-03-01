@@ -1,11 +1,46 @@
-use core::time::Duration;
-use log::{error, info};
-use postgres::{Client, NoTls};
-use std::net::TcpStream;
+use log::info;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::net::TcpStream;
+use tokio::sync::Semaphore;
+use tokio::time::{timeout, Duration};
+use tokio_postgres::NoTls;
+use tokio_postgres::Row;
+use tokio_postgres::Transaction;
 
 use void::config;
 
-fn main() {
+async fn fetch_batch(
+    transaction: &tokio_postgres::Transaction<'_>,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<Row>, Box<dyn std::error::Error>> {
+    let rows = transaction
+        .query(
+            "SELECT address, tcp_port FROM discv4.nodes LIMIT $1 OFFSET $2",
+            &[&limit, &offset],
+        )
+        .await?;
+    Ok(rows)
+}
+
+async fn batch_update(
+    transaction: &Transaction<'_>,
+    updates: Vec<(String, i32)>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for (address, tcp_port) in updates {
+        transaction
+            .execute(
+                "UPDATE discv4.nodes SET last_ping_timestamp = NOW() WHERE address = $1 AND tcp_port = $2 AND (last_ping_timestamp IS NULL OR last_ping_timestamp < NOW())",
+                &[&address, &tcp_port],
+            )
+            .await?;
+    }
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // init logger
     env_logger::init();
 
@@ -19,34 +54,61 @@ fn main() {
         cfg.database.host, cfg.database.user, cfg.database.password, cfg.database.dbname,
     );
 
-    let mut client = Client::connect(&database_params, NoTls).expect("Connection error");
+    let (mut client, connection) = tokio_postgres::connect(&database_params, NoTls).await?;
+
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            eprintln!("Connection error: {}", e);
+        }
+    });
 
     let timeout_duration = Duration::from_millis(3000);
+    let semaphore = Arc::new(Semaphore::new(cfg.ping.permits)); // Limit of concurrent tasks
+    let batch_size = cfg.ping.batch_size; // Number of rows to process per batch
+    let mut offset = 0;
 
-    for row in client.query("SELECT * FROM discv4.nodes WHERE last_ping_timestamp IS NULL OR (last_ping_timestamp < NOW() - INTERVAL '5 minutes')", &[]).unwrap() {
-        let address: String = row.get(0);
-        let tcp_port: i32 = row.get(1);
-        let _udp_port: i32 = row.get(2);
-        let _node_id: Vec<u8> = row.get(3);
+    loop {
+        let transaction = client.transaction().await?;
+        let rows = fetch_batch(&transaction, offset, batch_size).await?;
+        if rows.is_empty() {
+            break;
+        }
 
-        let socket_address = format!("{}:{}", address, tcp_port).parse().unwrap();
+        let mut tasks = Vec::new();
+        for row in rows {
+            let address: String = row.get(0);
+            let tcp_port: i32 = row.get(1);
+            let semaphore = Arc::clone(&semaphore);
 
-        match TcpStream::connect_timeout(&socket_address, timeout_duration) {
-            Ok(_) => {
-                info!("{} on port {} is working", address, tcp_port);
-                if let Err(err) = client.execute(
-                    "UPDATE discv4.nodes SET last_ping_timestamp = NOW() WHERE address = $1 AND tcp_port = $2",
-                    &[&address, &tcp_port],
-                ) {
-                    error!("Failed to update row: {}", err);
+            tasks.push(tokio::spawn(async move {
+                let _permit = semaphore.acquire().await.unwrap(); // Wait for a permit
+                let socket_address: SocketAddr =
+                    format!("{}:{}", address, tcp_port).parse().unwrap();
+
+                match timeout(timeout_duration, TcpStream::connect(&socket_address)).await {
+                    Ok(Ok(_)) => {
+                        println!("{} on port {} is working", address, tcp_port);
+                        Some((address, tcp_port))
+                    }
+                    Ok(Err(_)) | Err(_) => {
+                        println!("{} on port {} is NOT WORKING...", address, tcp_port);
+                        None
+                    }
                 }
-            }
-            Err(_) => {
-                error!(
-                    "{} on port {} is NOT WORKING...",
-                    address, tcp_port
-                );
+            }));
+        }
+        let mut updates = Vec::new();
+        for task in tasks {
+            if let Some(update) = task.await? {
+                updates.push(update);
             }
         }
+
+        batch_update(&transaction, updates).await?;
+        transaction.commit().await?;
+
+        offset += batch_size;
     }
+
+    Ok(())
 }

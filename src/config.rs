@@ -12,8 +12,15 @@ pub struct DatabaseConfig {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct PingConfig {
+    pub batch_size: i64,
+    pub permits: usize,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct Config {
     pub database: DatabaseConfig,
+    pub ping: PingConfig,
 }
 
 pub fn read_config() -> Config {

@@ -3,3 +3,8 @@ host = "localhost"
 user = "postgres"
 password = "wow"
 dbname = "blockchains"
+
+[ping]
+batch_size = 1000
+permits = 1000
+
