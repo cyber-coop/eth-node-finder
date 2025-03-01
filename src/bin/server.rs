@@ -6,7 +6,7 @@ use secp256k1::SecretKey;
 use rand::RngCore;
 use sha3::{Digest, Keccak256};
 use discv4::Node;
-use tokio_postgres::NoTls;
+use std::sync::Arc;
 
 static SERVER_ADDRESS: &str = "0.0.0.0";
 static SERVER_PORT: u16 = 50505;
@@ -21,7 +21,6 @@ use void::config;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // init logger
     env_logger::init();
-    // tracing_subscriber::fmt::init();
 
     info!("Starting server");
 
@@ -31,7 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "host={} user={} password={} dbname={}",
         cfg.database.host, cfg.database.user, cfg.database.password, cfg.database.dbname,
     );
-    let (postgres_client, connection) = tokio_postgres::connect(&database_params, NoTls)
+    let (postgres_client, connection) = tokio_postgres::connect(&database_params, tokio_postgres::NoTls)
         .await
         .unwrap();
     info!("Connection to the database created");
@@ -64,19 +63,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(format!("{SERVER_ADDRESS}:{SERVER_PORT}")).unwrap();
     info!("Server started on {SERVER_ADDRESS}:{SERVER_PORT}");
     
+    let postgres = Arc::new(postgres_client);
     loop {
         let (mut socket, addr) = listener.accept().unwrap();
         info!("New connection: {:?}", addr);
 
+        let postgres = postgres.clone();
         tokio::spawn(async move {
-            if let Err(err) = handle_connection(&mut socket, &private_key.to_vec(), networks::Network::ETHEREUM_MAINNET).await {
+            if let Err(err) = handle_connection(&mut socket, &postgres, &private_key.to_vec(), networks::Network::ETHEREUM_MAINNET).await {
                 error!("Failed to handle connection request : {}", err.to_string());
             };
         });
     }
 }
 
-async fn handle_connection(stream: &mut TcpStream, private_key: &Vec<u8>, network: networks::Network) -> Result<(), Box<dyn Error>> {
+async fn handle_connection(stream: &mut TcpStream, postgres_client: &tokio_postgres::Client, private_key: &Vec<u8>, network: networks::Network) -> Result<(), Box<dyn Error>> {
+    let insert_statement = postgres_client.prepare("INSERT INTO discv4.nodes (address, tcp_port, id, network_id, client, capabilities) VALUES ($1,$2,$3,$4,$5,$6);").await.unwrap();
 
     let mut nonce = vec![0; 32];
     rand::thread_rng().fill_bytes(&mut nonce);
@@ -114,16 +116,16 @@ async fn handle_connection(stream: &mut TcpStream, private_key: &Vec<u8>, networ
     // Create Hello
     let secp = secp256k1::Secp256k1::new();
     let private_key = secp256k1::SecretKey::from_slice(&private_key).unwrap();
-    let hello = message::HelloMessage {
+    let hello_message = message::HelloMessage {
         protocol_version: message::BASE_PROTOCOL_VERSION,
         client: String::from("deadbrain corp."),
-        capabilities: vec![("eth".into(), 67), ("eth".into(), 68)],
+        capabilities: vec![("eth".into(), 64), ("eth".into(), 65), ("eth".into(), 66), ("eth".into(), 67), ("eth".into(), 68)],
         port: 0,
         id: secp256k1::PublicKey::from_secret_key(&secp, &private_key).serialize_uncompressed()[1..].to_vec(),
     };
     
-    let hello = message::create_hello_message(hello);
-    utils::send_message(hello, stream, &mut egress_mac, &mut egress_aes);
+    let payload = message::create_hello_message(hello_message);
+    utils::send_message(payload, stream, &mut egress_mac, &mut egress_aes);
 
     // Handle HELLO
     let uncrypted_body = match utils::read_message(stream, &mut ingress_mac, &mut ingress_aes) {
@@ -141,12 +143,14 @@ async fn handle_connection(stream: &mut TcpStream, private_key: &Vec<u8>, networ
 
     // Should be HELLO
     assert_eq!(0x80, uncrypted_body[0]);
-    let hello_message = message::parse_hello_message(uncrypted_body[1..].to_vec());
-    info!("{:?}", &hello_message);
+    let hello = message::parse_hello_message(uncrypted_body[1..].to_vec());
+    info!("{:?}", &hello);
+
+    let capabilities = serde_json::to_string(&hello.capabilities).unwrap();
 
     // We need to find the highest eth version it supports
     let mut version = 0;
-    for capability in &hello_message.capabilities {
+    for capability in &hello.capabilities {
         if capability.0.to_string() == "eth" {
             if capability.1 > version {
                 version = capability.1;
@@ -166,7 +170,7 @@ async fn handle_connection(stream: &mut TcpStream, private_key: &Vec<u8>, networ
     info!("Found status {:?}", &status);
 
     info!("Sending STATUS message");
-    let status = message::Status {
+    let status_message = message::Status {
         version,
         network_id: network.network_id, // TODO: allow to do random networks
         td: network.head_td.to_be_bytes().to_vec(),
@@ -175,8 +179,12 @@ async fn handle_connection(stream: &mut TcpStream, private_key: &Vec<u8>, networ
         fork_id: (network.fork_id[0].to_be_bytes().to_vec(), network.fork_id[1].into()),
     };
 
-    let status = message::create_status_message(status);
-    utils::send_message(status, stream, &mut egress_mac, &mut egress_aes);
+    let payload = message::create_status_message(status_message);
+    utils::send_message(payload, stream, &mut egress_mac, &mut egress_aes);
+
+    let address = stream.local_addr().unwrap();
+    let cap : Vec<(String, u32)> = serde_json::from_str(&capabilities).unwrap();
+    let _ = postgres_client.execute(&insert_statement, &[&address.ip(), &(address.port() as i32), &remote_id, &(status.network_id as i64), &hello.client, &serde_json::to_value(&cap).unwrap()]).await.unwrap();
 
     Ok(())
 }
