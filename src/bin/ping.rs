@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Loading ping config
     let timeout_duration = Duration::from_millis(cfg.ping.timeout);
-    let semaphore = Arc::new(Semaphore::new(cfg.ping.permits));
+    let semaphore = Arc::new(Semaphore::new(cfg.ping.task_limit));
     let batch_size = cfg.ping.batch_size;
     let interval = Duration::from_secs(cfg.ping.interval);
 

@@ -7,6 +7,6 @@ dbname = "blockchains"
 [ping]
 interval = 300    # The delay between each ping round [unit: s]
 batch_size = 1000 # The number of ip address per batch
-permits = 500     # The max number of concurent task to run per batch
+task_limit = 500  # The max number of concurent task to run per batch
 timeout = 3000    # The maximum delay to wait for ping to respond [unit: ms]
 
