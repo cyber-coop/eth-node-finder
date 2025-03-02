@@ -15,6 +15,8 @@ pub struct DatabaseConfig {
 pub struct PingConfig {
     pub batch_size: i64,
     pub permits: usize,
+    pub timeout: u64,
+    pub interval: u64,
 }
 
 #[derive(Debug, Deserialize)]

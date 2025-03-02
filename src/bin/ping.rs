@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio::sync::Semaphore;
-use tokio::time::{timeout, Duration};
+use tokio::time::{sleep, timeout, Duration};
 use tokio_postgres::NoTls;
 use tokio_postgres::Row;
 use tokio_postgres::Transaction;
@@ -62,53 +62,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    let timeout_duration = Duration::from_millis(3000);
-    let semaphore = Arc::new(Semaphore::new(cfg.ping.permits)); // Limit of concurrent tasks
-    let batch_size = cfg.ping.batch_size; // Number of rows to process per batch
-    let mut offset = 0;
+    // Loading ping config
+    let timeout_duration = Duration::from_millis(cfg.ping.timeout);
+    let semaphore = Arc::new(Semaphore::new(cfg.ping.permits));
+    let batch_size = cfg.ping.batch_size;
+    let interval = Duration::from_secs(cfg.ping.interval);
+
+    let mut round_id = 0;
 
     loop {
-        let transaction = client.transaction().await?;
-        let rows = fetch_batch(&transaction, offset, batch_size).await?;
-        if rows.is_empty() {
-            break;
-        }
-
-        let mut tasks = Vec::new();
-        for row in rows {
-            let address: String = row.get(0);
-            let tcp_port: i32 = row.get(1);
-            let semaphore = Arc::clone(&semaphore);
-
-            tasks.push(tokio::spawn(async move {
-                let _permit = semaphore.acquire().await.unwrap(); // Wait for a permit
-                let socket_address: SocketAddr =
-                    format!("{}:{}", address, tcp_port).parse().unwrap();
-
-                match timeout(timeout_duration, TcpStream::connect(&socket_address)).await {
-                    Ok(Ok(_)) => {
-                        info!("{} on port {} is working", address, tcp_port);
-                        Some((address, tcp_port))
-                    }
-                    Ok(Err(_)) | Err(_) => {
-                        error!("{} on port {} is NOT WORKING...", address, tcp_port);
-                        None
-                    }
-                }
-            }));
-        }
-        let mut updates = Vec::new();
-        for task in tasks {
-            if let Some(update) = task.await? {
-                updates.push(update);
+        let mut offset = 0;
+        loop {
+            let transaction = client.transaction().await?;
+            let rows = fetch_batch(&transaction, offset, batch_size).await?;
+            if rows.is_empty() {
+                break;
             }
+
+            let mut tasks = Vec::new();
+            for row in rows {
+                let address: String = row.get(0);
+                let tcp_port: i32 = row.get(1);
+                let semaphore = Arc::clone(&semaphore);
+
+                tasks.push(tokio::spawn(async move {
+                    let _permit = semaphore.acquire().await.unwrap(); // Wait for a permit
+                    let socket_address: SocketAddr =
+                        format!("{}:{}", address, tcp_port).parse().unwrap();
+
+                    match timeout(timeout_duration, TcpStream::connect(&socket_address)).await {
+                        Ok(Ok(_)) => {
+                            info!("{} on port {} is working", address, tcp_port);
+                            Some((address, tcp_port))
+                        }
+                        Ok(Err(_)) | Err(_) => {
+                            error!("{} on port {} is NOT WORKING...", address, tcp_port);
+                            None
+                        }
+                    }
+                }));
+            }
+            let mut updates = Vec::new();
+            for task in tasks {
+                if let Some(update) = task.await? {
+                    updates.push(update);
+                }
+            }
+
+            batch_update(&transaction, updates).await?;
+            transaction.commit().await?;
+
+            offset += batch_size;
         }
-
-        batch_update(&transaction, updates).await?;
-        transaction.commit().await?;
-
-        offset += batch_size;
+        if offset > 0 {
+            info!(
+                "Round {} finished. Waiting for {} seconds before the next batch...",
+                round_id,
+                interval.as_secs()
+            );
+            sleep(interval).await;
+        }
+        round_id += 1;
     }
-
-    Ok(())
 }

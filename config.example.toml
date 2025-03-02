@@ -5,6 +5,8 @@ password = "wow"
 dbname = "blockchains"
 
 [ping]
-batch_size = 1000
-permits = 1000
+interval = 300    # The delay between each ping round [unit: s]
+batch_size = 1000 # The number of ip address per batch
+permits = 500     # The max number of concurent task to run per batch
+timeout = 3000    # The maximum delay to wait for ping to respond [unit: ms]
 
