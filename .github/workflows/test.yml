@@ -1,0 +1,24 @@
+name: Run tests
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo 
+        uses: actions/checkout@v3
+      - name: Enforce formatting
+        run: cargo fmt --check
+
+  test:
+    name: Integration test
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout Repo 
+      uses: actions/checkout@v3
+    - name: Run tests
+      run: cargo test --verbose

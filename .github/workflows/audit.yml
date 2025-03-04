@@ -1,0 +1,19 @@
+name: Security audit
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'
+  push:
+    paths:
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+
+jobs:
+  security_audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install cargo audit
+        run: cargo install cargo-audit --locked
+      - name: Scan for vulnerabilities
+        run: cargo audit
