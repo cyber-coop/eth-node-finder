@@ -184,7 +184,7 @@ async fn handle_connection(stream: &mut TcpStream, postgres_client: &tokio_postg
 
     let address = stream.local_addr().unwrap();
     let cap : Vec<(String, u32)> = serde_json::from_str(&capabilities).unwrap();
-    let _ = postgres_client.execute(&insert_statement, &[&address.ip(), &(address.port() as i32), &remote_id, &(status.network_id as i64), &hello.client, &serde_json::to_value(&cap).unwrap()]).await.unwrap();
+    let _ = postgres_client.execute(&insert_statement, &[&address.ip().to_string(), &(address.port() as i32), &remote_id, &(status.network_id as i64), &hello.client, &serde_json::to_value(&cap).unwrap()]).await.unwrap();
 
     Ok(())
 }
