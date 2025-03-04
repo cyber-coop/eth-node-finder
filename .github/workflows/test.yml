@@ -15,6 +15,8 @@ jobs:
         run: cargo fmt --check
 
   test:
+    name: Integration test
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout Repo 
       uses: actions/checkout@v3
