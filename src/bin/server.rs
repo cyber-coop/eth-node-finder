@@ -78,7 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn handle_connection(stream: &mut TcpStream, postgres_client: &tokio_postgres::Client, private_key: &Vec<u8>, network: networks::Network) -> Result<(), Box<dyn Error>> {
-    let insert_statement = postgres_client.prepare("INSERT INTO discv4.nodes (address, tcp_port, id, network_id, client, capabilities) VALUES ($1,$2,$3,$4,$5,$6);").await.unwrap();
+    let insert_statement = postgres_client.prepare("INSERT INTO discv4.nodes (address, tcp_port, id, network_id, client, capabilities) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO UPDATE SET network_id=$4, client=$5, capabilities=$6;").await.unwrap();
 
     let mut nonce = vec![0; 32];
     rand::thread_rng().fill_bytes(&mut nonce);

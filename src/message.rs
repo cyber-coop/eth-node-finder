@@ -1,3 +1,5 @@
+use std::fmt;
+
 const BASE_PROTOCOL_OFFSET: u8 = 16;
 pub const BASE_PROTOCOL_VERSION: u32 = 5;
 
