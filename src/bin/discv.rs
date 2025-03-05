@@ -1,7 +1,7 @@
-use log::{error, info};
 use discv4::Node;
-use tokio_postgres::NoTls;
+use log::{error, info};
 use secp256k1::SecretKey;
+use tokio_postgres::NoTls;
 
 use void::config;
 
@@ -49,8 +49,10 @@ async fn main() {
     .await
     .unwrap();
 
-
-    let statement = postgres_client.prepare("INSERT INTO discv4.nodes VALUES ($1,$2,$3,$4);").await.unwrap();
+    let statement = postgres_client
+        .prepare("INSERT INTO discv4.nodes VALUES ($1,$2,$3,$4);")
+        .await
+        .unwrap();
     loop {
         let target = rand::random();
         info!("Looking up random target: {}", target);
@@ -59,7 +61,17 @@ async fn main() {
         for entry in result {
             info!("Found node: {:?}", entry);
             // we don't check result because we don't care
-            let _ = postgres_client.execute(&statement, &[&entry.address.to_string(), &(entry.tcp_port as i32), &(entry.udp_port as i32), &entry.id.as_bytes()]).await;
+            let _ = postgres_client
+                .execute(
+                    &statement,
+                    &[
+                        &entry.address.to_string(),
+                        &(entry.tcp_port as i32),
+                        &(entry.udp_port as i32),
+                        &entry.id.as_bytes(),
+                    ],
+                )
+                .await;
         }
 
         info!("Current nodes: {}", node.num_nodes());

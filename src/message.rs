@@ -1,3 +1,5 @@
+use std::fmt;
+
 const BASE_PROTOCOL_OFFSET: u8 = 16;
 pub const BASE_PROTOCOL_VERSION: u32 = 5;
 
@@ -67,7 +69,7 @@ pub fn parse_status_message(payload: Vec<u8>) -> Option<Status> {
     }
 
     let version: u32 = r.at(0).unwrap().as_val().unwrap();
-    let network_id: u64  = r.at(1).unwrap().as_val().unwrap();
+    let network_id: u64 = r.at(1).unwrap().as_val().unwrap();
     let td: Vec<u8> = r.at(2).unwrap().as_val().unwrap();
     let blockhash: Vec<u8> = r.at(3).unwrap().as_val().unwrap();
     let genesis: Vec<u8> = r.at(4).unwrap().as_val().unwrap();
@@ -112,7 +114,7 @@ pub fn create_hello_message(hello: HelloMessage) -> Vec<u8> {
         s.append(&capability.0);
         s.append(&capability.1);
     }
-    
+
     s.append(&hello.port);
     s.append(&hello.id);
 
@@ -129,7 +131,7 @@ pub fn parse_hello_message(payload: Vec<u8>) -> HelloMessage {
     assert!(r.is_list());
 
     let protocol_version: u32 = r.at(0).unwrap().as_val().unwrap();
-    let client: String  = r.at(1).unwrap().as_val().unwrap();
+    let client: String = r.at(1).unwrap().as_val().unwrap();
     let capabilities_list = r.at(2).unwrap();
 
     let mut capabilities: Vec<(String, u32)> = vec![];
@@ -151,6 +153,6 @@ pub fn parse_hello_message(payload: Vec<u8>) -> HelloMessage {
         client,
         capabilities,
         port,
-        id
+        id,
     }
 }

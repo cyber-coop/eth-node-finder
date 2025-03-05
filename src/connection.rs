@@ -1,22 +1,27 @@
 use secp256k1::rand::RngCore;
 use secp256k1::SecretKey;
+use sha3::Digest;
+use sha3::Keccak256;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::TcpStream;
 use std::time::Duration;
-use sha3::Keccak256;
-use sha3::Digest;
 
-use crate::utils;
 use crate::message;
+use crate::utils;
 
 /// DEPRECATED
 
-
 // We return the capabilities the nework id and the agent string. If something fails we return an arror message.
-pub async fn connect(address: IpAddr, tcp_port: u16, remote_id: Vec<u8>) -> (Option<Vec<(String, u32)>>, Option<i64>, Option<String>) {
+pub async fn connect(
+    address: IpAddr,
+    tcp_port: u16,
+    remote_id: Vec<u8>,
+) -> (Option<Vec<(String, u32)>>, Option<i64>, Option<String>) {
     // connect to node
-    let addr: SocketAddr = format!("{}:{}", address, tcp_port).parse().expect("To be able to parse address");
+    let addr: SocketAddr = format!("{}:{}", address, tcp_port)
+        .parse()
+        .expect("To be able to parse address");
 
     let target = format!("{}@{}", hex::encode(&remote_id), addr);
 
@@ -129,9 +134,11 @@ pub async fn connect(address: IpAddr, tcp_port: u16, remote_id: Vec<u8>) -> (Opt
         client: String::from("deadbrain corp."),
         capabilities: vec![("eth".into(), 67), ("eth".into(), 68)],
         port: 0,
-        id: secp256k1::PublicKey::from_secret_key(&secp, &private_key).serialize_uncompressed()[1..].to_vec(),
+        id: secp256k1::PublicKey::from_secret_key(&secp, &private_key).serialize_uncompressed()
+            [1..]
+            .to_vec(),
     };
-    
+
     let hello = message::create_hello_message(hello);
     utils::send_message(hello, &mut stream, &mut egress_mac, &mut egress_aes);
 
@@ -166,7 +173,11 @@ pub async fn connect(address: IpAddr, tcp_port: u16, remote_id: Vec<u8>) -> (Opt
         warn!(target: &target,
             "Time out",
         );
-        return (Some(hello_message.capabilities), None, Some(hello_message.client));
+        return (
+            Some(hello_message.capabilities),
+            None,
+            Some(hello_message.client),
+        );
     }
     let uncrypted_body = uncrypted_body.unwrap();
     if uncrypted_body[0] == 0x01 {
@@ -177,7 +188,11 @@ pub async fn connect(address: IpAddr, tcp_port: u16, remote_id: Vec<u8>) -> (Opt
             "Disconnect {}",
             hex::encode(&uncrypted_body)
         );
-        return (Some(hello_message.capabilities), None, Some(hello_message.client));
+        return (
+            Some(hello_message.capabilities),
+            None,
+            Some(hello_message.client),
+        );
     }
     let status = message::parse_status_message(uncrypted_body[1..].to_vec()).unwrap();
 
@@ -186,5 +201,9 @@ pub async fn connect(address: IpAddr, tcp_port: u16, remote_id: Vec<u8>) -> (Opt
         &status.network_id
     );
 
-    return (Some(hello_message.capabilities), Some(status.network_id as i64), Some(hello_message.client));
+    return (
+        Some(hello_message.capabilities),
+        Some(status.network_id as i64),
+        Some(hello_message.client),
+    );
 }

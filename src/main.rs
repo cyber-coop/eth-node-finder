@@ -1,13 +1,13 @@
 use discv4::Node;
-use tokio_postgres::NoTls;
 use secp256k1::SecretKey;
+use tokio_postgres::NoTls;
 
-pub mod utils;
-pub mod mac;
-pub mod message;
-pub mod errors;
 pub mod config;
 pub mod connection;
+pub mod errors;
+pub mod mac;
+pub mod message;
+pub mod utils;
 
 #[macro_use]
 extern crate log;
@@ -44,8 +44,13 @@ async fn main() {
         }
     });
 
-    postgres_client.execute("CREATE SCHEMA IF NOT EXISTS discv4;", &[]).await.unwrap();
-    postgres_client.execute("CREATE TABLE IF NOT EXISTS discv4.nodes (
+    postgres_client
+        .execute("CREATE SCHEMA IF NOT EXISTS discv4;", &[])
+        .await
+        .unwrap();
+    postgres_client
+        .execute(
+            "CREATE TABLE IF NOT EXISTS discv4.nodes (
         address TEXT NOT NULL,
         tcp_port INT,
         udp_port INT,
@@ -53,7 +58,11 @@ async fn main() {
         network_id BIGINT,
         client TEXT,
         capabilities JSON
-      );", &[]).await.unwrap();
+      );",
+            &[],
+        )
+        .await
+        .unwrap();
 
     info!("Table created if doesn't exist");
 
@@ -79,7 +88,8 @@ async fn main() {
         let records = node.lookup(target).await;
 
         let _ = futures::future::join_all(records.iter().map(|record| async {
-            let result = connection::connect(record.address, record.tcp_port, record.id.0.to_vec()).await;
+            let result =
+                connection::connect(record.address, record.tcp_port, record.id.0.to_vec()).await;
 
             let _ = postgres_client
                 .execute(
@@ -92,12 +102,11 @@ async fn main() {
                         &result.1,
                         &serde_json::to_value(&result.0).unwrap(),
                         &result.2,
-
                     ],
                 )
                 .await;
-
-        })).await;
+        }))
+        .await;
 
         info!("Current nodes: {}", node.num_nodes());
     }

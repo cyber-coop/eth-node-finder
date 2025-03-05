@@ -1,18 +1,18 @@
 use devp2p::{ecies::ECIES, util::pk2id};
-use void::utils;
 use secp256k1_20::{PublicKey, SecretKey, SECP256K1};
 use sha3::{Digest, Keccak256};
+use void::utils;
 
 #[test]
 fn communicate() {
     let server_secret_key = SecretKey::from_slice(&[1_u8; 32]).unwrap();
     let server_public_key = PublicKey::from_secret_key(SECP256K1, &server_secret_key);
-    let server_nonce =
-        primitive_types::H256::from_slice(&hex::decode("0000000000000000000000000000000000000000000000000000000000000000").unwrap());
-    let server_ephemeral_key = SecretKey::from_slice(&[2_u8; 32])
-        .unwrap();
+    let server_nonce = primitive_types::H256::from_slice(
+        &hex::decode("0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+    );
+    let server_ephemeral_key = SecretKey::from_slice(&[2_u8; 32]).unwrap();
     let server_id = pk2id(&server_public_key).0.to_vec();
-    
+
     let private_key =
         hex::decode("472D4B6150645267556B58703273357638792F423F4528482B4D625165546856").unwrap();
     // Should be generated randomly
@@ -30,7 +30,13 @@ fn communicate() {
     let client_id = pk2id(&client_public_key).0.to_vec();
 
     // let mut server_ecies = ECIES::new_static_server(server_secret_key, server_nonce, server_ephemeral_key).unwrap();
-    let mut client_ecies = ECIES::new_static_client(client_secret_key, primitive_types::H512::from_slice(&server_id), server_nonce, client_ephemeral_key).unwrap();
+    let mut client_ecies = ECIES::new_static_client(
+        client_secret_key,
+        primitive_types::H512::from_slice(&server_id),
+        server_nonce,
+        client_ephemeral_key,
+    )
+    .unwrap();
 
     let mut init_msg =
         utils::create_auth_eip8(&server_id, &private_key, &nonce, &ephemeral_privkey, &pad);
@@ -51,7 +57,12 @@ fn communicate() {
     let shared_mac_data = auth[0..2].to_vec();
     let payload = auth[2..].to_vec();
 
-    let (remote_id, remote_nonce, ephemeral_shared_secret) = utils::verify_auth_eip8(&payload, &shared_mac_data, &[1_u8; 32].to_vec(), &[2_u8; 32].to_vec());
+    let (remote_id, remote_nonce, ephemeral_shared_secret) = utils::verify_auth_eip8(
+        &payload,
+        &shared_mac_data,
+        &[1_u8; 32].to_vec(),
+        &[2_u8; 32].to_vec(),
+    );
 
     let remote_data = [shared_mac_data, payload].concat();
 
@@ -65,12 +76,15 @@ fn communicate() {
         ephemeral_shared_secret,
         remote_data,
         ack,
-        h_nonce
+        h_nonce,
     );
 
     let server_to_client_data = [0_u8, 1_u8, 2_u8, 3_u8, 4_u8];
 
-    let mut header = utils::create_header(server_to_client_data.len(), &mut egress_mac, &mut egress_aes);
+    let mut header = utils::create_header(
+        server_to_client_data.len(),
+        &mut egress_mac,
+        &mut egress_aes,
+    );
     client_ecies.read_header(&mut header).unwrap();
-
 }
