@@ -210,7 +210,7 @@ async fn handle_connection(
     let payload = message::create_status_message(status_message);
     utils::send_message(payload, stream, &mut egress_mac, &mut egress_aes);
 
-    let address = stream.local_addr().unwrap();
+    let address = stream.peer_addr().expect("to have a peer address");
     let cap: Vec<(String, u32)> = serde_json::from_str(&capabilities).unwrap();
     let _ = postgres_client
         .execute(
