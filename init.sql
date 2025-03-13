@@ -6,5 +6,6 @@ CREATE TABLE IF NOT EXISTS discv4.nodes (
     id BYTEA NOT NULL PRIMARY KEY,
     network_id BIGINT,
     client TEXT,
-    capabilities JSON
+    capabilities JSON,
+    last_ping_timestamp TIMESTAMP DEFAULT NULL
 );

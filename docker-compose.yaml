@@ -10,6 +10,8 @@ services:
     volumes:
       - ./config.toml:/config.toml
     command: discv
+    ports:
+      - "0.0.0.0:30303:30303/udp"
 
   ping:
     build: .
@@ -65,5 +67,6 @@ services:
       timeout: 5s
       retries: 5
     volumes:
+      - ./data/:/var/lib/postgresql/data/
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
       - ./migrations:/migrations

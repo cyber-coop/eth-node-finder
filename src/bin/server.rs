@@ -86,6 +86,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 error!("Failed to handle connection request : {}", err.to_string());
             };
         });
+
+        info!("Connection closed ({:?})", addr);
     }
 }
 
