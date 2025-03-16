@@ -7,6 +7,7 @@ use std::error::Error;
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::sync::Arc;
+use std::time::Duration;
 
 static SERVER_ADDRESS: &str = "0.0.0.0";
 static SERVER_PORT: u16 = 50505;
@@ -71,6 +72,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let postgres = Arc::new(postgres_client);
     loop {
         let (mut socket, addr) = listener.accept().unwrap();
+        // Set read timeout
+        socket
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
         info!("New connection: {:?}", addr);
 
         let postgres = postgres.clone();

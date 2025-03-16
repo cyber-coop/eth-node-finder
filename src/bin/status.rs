@@ -3,10 +3,10 @@ use secp256k1::rand::RngCore;
 use secp256k1::{rand, SecretKey};
 use sha3::{Digest, Keccak256};
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::{net::TcpStream, time::Duration};
 use tokio::task::JoinSet;
 use tokio_postgres::NoTls;
-use std::sync::Arc;
 
 use void::config;
 use void::message;
@@ -96,7 +96,7 @@ async fn main() {
             info!(target: &target,
                 "Sending EIP8 Auth message",
             );
-            
+
             if let Err(err) = utils::send_eip8_auth_message(&init_msg, &mut stream) {
                 error!(target: &target,
                     "Couldn't send eip8 ({})",
@@ -173,14 +173,13 @@ async fn main() {
              *
              ******************/
 
-            let uncrypted_body =
-                utils::read_message(&mut stream, &mut ingress_mac, &mut ingress_aes);
-
-            if uncrypted_body.is_err() {
-                error!(target: &target,"Time out");
-                return;
-            }
-            let uncrypted_body = uncrypted_body.unwrap();
+            let uncrypted_body = match utils::read_message(&mut stream, &mut ingress_mac, &mut ingress_aes) {
+                Ok(ub) => ub,
+                Err(err) => {
+                    error!(target: &target,"{}", err);
+                    return;
+                }
+            };
 
             if uncrypted_body[0] == 0x01 {
                 // we have a disconnect message unfortunately
@@ -275,13 +274,13 @@ async fn main() {
             info!(target: &target,
                 "Handling STATUS message",
             );
-            let uncrypted_body =
-                utils::read_message(&mut stream, &mut ingress_mac, &mut ingress_aes);
-            if uncrypted_body.is_err() {
-                error!(target: &target, "Time out");
-                return;
-            }
-            let uncrypted_body = uncrypted_body.unwrap();
+            let uncrypted_body = match utils::read_message(&mut stream, &mut ingress_mac, &mut ingress_aes) {
+                Ok(ub) => ub,
+                Err(err) => {
+                    error!(target: &target,"{}", err);
+                    return;
+                }
+            };
 
             if uncrypted_body[0] == 0x01 {
                 // we have a disconnect message unfortunately
