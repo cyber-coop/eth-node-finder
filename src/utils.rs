@@ -204,10 +204,16 @@ pub fn read_auth_eip8(stream: &mut TcpStream) -> Result<(Vec<u8>, Vec<u8>), Box<
     let shared_mac_data = &buf[0..2];
 
     let mut payload = vec![0u8; size_expected.into()];
-    let size = stream.read(&mut payload)?;
+    let mut attempts = 0;
+    while stream.peek(&mut payload)? < size_expected {
+        thread::sleep(Duration::from_millis(100));
 
-    // TODO: better handle this to return an error and have a timeout
-    assert_eq!(size, size_expected);
+        attempts = attempts + 1;
+        if attempts >= TIMEOUT_ATTEMPRS {
+            return Err("Timed out".into());
+        }
+    }
+    stream.read_exact(&mut payload)?;
 
     Ok((payload, shared_mac_data.to_vec()))
 }
@@ -453,13 +459,9 @@ pub fn read_message(
     stream: &mut std::net::TcpStream,
     ingress_mac: &mut mac::MAC,
     ingress_aes: &mut Aes256Ctr64BE,
-) -> Result<Vec<u8>, ()> {
+) -> Result<Vec<u8>, Box<dyn error::Error>> {
     let mut buf = [0u8; 32];
-    let res = stream.read_exact(&mut buf);
-
-    if res.is_err() {
-        return Err(());
-    }
+    let res = stream.read_exact(&mut buf)?;
 
     let next_size = parse_header(&buf.to_vec(), ingress_mac, ingress_aes);
 
@@ -472,14 +474,14 @@ pub fn read_message(
     // we have this loop to be sure we have received the complete payload
     while body.len() < body_size {
         let mut buf: Vec<u8> = vec![0; body_size - body.len()];
-        let l = stream.read(&mut buf).map_err(|_| ())?;
+        let l = stream.read(&mut buf)?;
 
         body.extend(&buf[0..l]);
-        thread::sleep(Duration::from_millis(500));
+        thread::sleep(Duration::from_millis(100));
 
         attempts = attempts + 1;
         if attempts >= TIMEOUT_ATTEMPRS {
-            return Err(());
+            return Err("Timed out".into());
         }
     }
 
@@ -520,10 +522,16 @@ pub fn read_ack_message(
     let shared_mac_data = &buf[0..2];
 
     let mut payload = vec![0u8; size_expected.into()];
-    let size = stream.read(&mut payload)?;
+    let mut attempts = 0;
+    while stream.peek(&mut payload)? < size_expected {
+        thread::sleep(Duration::from_millis(100));
 
-    // TODO: better handle this to return an error and have a timeout
-    assert_eq!(size, size_expected);
+        attempts = attempts + 1;
+        if attempts >= TIMEOUT_ATTEMPRS {
+            return Err("Timed out".into());
+        }
+    }
+    stream.read_exact(&mut payload)?;
 
     Ok((payload, shared_mac_data.to_vec()))
 }
