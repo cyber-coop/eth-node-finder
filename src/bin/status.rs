@@ -37,7 +37,7 @@ async fn main() {
     });
 
     let records = postgres_client
-        .query("SELECT * FROM discv4.nodes ORDER BY RANDOM();", &[])
+        .query("SELECT * FROM nodes ORDER BY RANDOM();", &[])
         .await
         .unwrap();
 
@@ -46,7 +46,7 @@ async fn main() {
     for record in records {
         let postgres = postgres.clone();
         set.spawn(async move {
-            let update_statement = postgres.prepare("UPDATE discv4.nodes SET network_id = $1, capabilities = $2, client = $3, last_ping_timestamp = NOW() WHERE id = $4;").await.unwrap();
+            let update_statement = postgres.prepare("UPDATE nodes SET network_id = $1, fork_id = $2, genesis = $3, capabilities = $4, client = $5, last_ping_timestamp = NOW() WHERE id = $6;").await.unwrap();
 
             let ip: String = record.get(0);
             let port: i32 = record.get(1);
@@ -304,6 +304,8 @@ async fn main() {
                     &update_statement,
                     &[
                         &(status.network_id as i64),
+                        &status.fork_id.0,
+                        &status.genesis,
                         &serde_json::to_value(&cap).unwrap(),
                         &hello_message.client,
                         &remote_id,

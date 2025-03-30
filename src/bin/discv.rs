@@ -50,7 +50,7 @@ async fn main() {
     .unwrap();
 
     let statement = postgres_client
-        .prepare("INSERT INTO discv4.nodes VALUES ($1,$2,$3,$4);")
+        .prepare("INSERT INTO nodes VALUES ($1,$2,$3,$4);")
         .await
         .unwrap();
     loop {
