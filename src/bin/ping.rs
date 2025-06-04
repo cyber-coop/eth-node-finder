@@ -24,12 +24,12 @@ fn main() {
     let timeout_duration = Duration::from_millis(3000);
 
     for row in client.query("SELECT * FROM nodes WHERE last_ping_timestamp IS NULL OR (last_ping_timestamp < NOW() - INTERVAL '5 minutes')", &[]).unwrap() {
-        let ip: String = row.get(0);
+        let address: String = row.get(0);
         let tcp_port: i32 = row.get(1);
         // let _udp_port: i32 = row.get(2);
         // let _node_id: Vec<u8> = row.get(3);
 
-        let socket_address = format!("{}:{}", ip, tcp_port).parse().unwrap();
+        let socket_address = format!("{}:{}", address, tcp_port).parse().unwrap();
 
         match TcpStream::connect_timeout(&socket_address, timeout_duration) {
             Ok(_) => {
