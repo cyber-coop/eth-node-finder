@@ -23,20 +23,20 @@ fn main() {
 
     let timeout_duration = Duration::from_millis(3000);
 
-    for row in client.query("SELECT * FROM discv4.nodes WHERE last_ping_timestamp IS NULL OR (last_ping_timestamp < NOW() - INTERVAL '5 minutes')", &[]).unwrap() {
-        let address: String = row.get(0);
+    for row in client.query("SELECT * FROM nodes WHERE last_ping_timestamp IS NULL OR (last_ping_timestamp < NOW() - INTERVAL '5 minutes')", &[]).unwrap() {
+        let ip: String = row.get(0);
         let tcp_port: i32 = row.get(1);
         // let _udp_port: i32 = row.get(2);
         // let _node_id: Vec<u8> = row.get(3);
 
-        let socket_address = format!("{}:{}", address, tcp_port).parse().unwrap();
+        let socket_address = format!("{}:{}", ip, tcp_port).parse().unwrap();
 
         match TcpStream::connect_timeout(&socket_address, timeout_duration) {
             Ok(_) => {
-                info!("{} on port {} is working", address, tcp_port);
+                info!("{} on port {} is working", ip, tcp_port);
                 if let Err(err) = client.execute(
-                    "UPDATE discv4.nodes SET last_ping_timestamp = NOW() WHERE address = $1 AND tcp_port = $2",
-                    &[&address, &tcp_port],
+                    "UPDATE nodes SET last_ping_timestamp = NOW() WHERE ip = $1 AND tcp_port = $2",
+                    &[&ip, &tcp_port],
                 ) {
                     error!("Failed to update row: {}", err);
                 }
@@ -44,7 +44,7 @@ fn main() {
             Err(_) => {
                 error!(
                     "{} on port {} is NOT WORKING...",
-                    address, tcp_port
+                    ip, tcp_port
                 );
             }
         }
