@@ -1,5 +1,5 @@
 [database]
-host = "localhost"
+host = "postgres"
 user = "postgres"
 password = "wow"
 dbname = "blockchains"

@@ -1,9 +1,11 @@
-version: "3.9"
-
 services:
   discv:
+    image: "janus"
+    # You can build remotely the docker image by uncommenting this line and commenting the other `build`
+    # build: https://github.com/cyber-coop/eth-node-finder.git
     build: .
     container_name: discv
+    pull_policy: never
     depends_on:
       postgres:
         condition: service_healthy
@@ -14,8 +16,11 @@ services:
       - "0.0.0.0:30303:30303/udp"
 
   ping:
+    image: "janus"
+    # build: https://github.com/cyber-coop/eth-node-finder.git
     build: .
     container_name: ping
+    pull_policy: never
     depends_on:
       postgres:
         condition: service_healthy
@@ -26,8 +31,11 @@ services:
     command: ping
 
   server:
+    image: "janus"
+    # build: https://github.com/cyber-coop/eth-node-finder.git
     build: .
     container_name: server
+    pull_policy: never
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,8 +49,10 @@ services:
       - "0.0.0.0:50505:50505/udp"
 
   status:
-    build: .
+    image: "janus"
+    build: https://github.com/cyber-coop/eth-node-finder.git
     container_name: status
+    pull_policy: never
     depends_on:
       postgres:
         condition: service_healthy
@@ -53,7 +63,7 @@ services:
     command: status
 
   postgres:
-    image: "postgres:latest"
+    image: "postgres:18"
     container_name: postgres
     ports:
       - "5432:5432"
@@ -67,6 +77,6 @@ services:
       timeout: 5s
       retries: 5
     volumes:
-      - ./data/:/var/lib/postgresql/data/
+      # This has been changed in postgres 18
+      - ./data/:/var/lib/postgresql/
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-      - ./migrations:/migrations
