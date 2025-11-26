@@ -2,11 +2,14 @@
 
 Collect all the node found on Ethereum DISCV4 protocol (but not all them are Ethereum). The nodes IP are stored in a postgres database.
 
-## Run
+## Quick Start
 
 ```
-$ docker compose -f docker-compose.yaml up  
+$ git clone https://github.com/cyber-coop/eth-node-finder.git
+$ mv config.example.toml config.yml
+$ docker compose up
 ```
+
 ## Dev
 
 Start postgres via docker compose.
@@ -30,7 +33,6 @@ Start `status` to see it runnning
 ```
 $ RUST_LOG=info cargo r --bin status
 ```
-
 
 ## Postgres
 
