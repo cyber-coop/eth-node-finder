@@ -239,34 +239,6 @@ async fn main() {
 
             /******************
              *
-             *  Send STATUS message
-             *
-             ******************/
-
-            info!(target: &target,
-                "Sending STATUS message",
-            );
-
-            let genesis_hash = [
-                212, 229, 103, 64, 248, 118, 174, 248, 192, 16, 184, 106, 64, 213, 245, 103, 69,
-                161, 24, 208, 144, 106, 52, 230, 154, 236, 140, 13, 177, 203, 143, 163,
-            ];
-
-            let status = message::Status {
-                version,
-                network_id: 1, // TODO: allow to do random networks
-                td: vec![0],
-                blockhash: genesis_hash.to_vec(),
-                genesis: genesis_hash.to_vec(),
-                fork_id: (vec![159, 61, 34, 84], 0),
-            };
-
-            // Send STATUS message
-            let status = message::create_status_message(status);
-            utils::send_message(status, &mut stream, &mut egress_mac, &mut egress_aes);
-
-            /******************
-             *
              *  Handle STATUS message
              *
              ******************/
@@ -291,21 +263,51 @@ async fn main() {
                 );
                 return;
             }
-            let status = message::parse_status_message(uncrypted_body[1..].to_vec()).unwrap();
+            let their_status = message::parse_status_message(uncrypted_body[1..].to_vec()).unwrap();
 
             info!(target: &target,
                 "network_id = {:?}",
-                &status.network_id
+                &their_status.network_id
             );
+
+            /******************
+             *
+             *  Send STATUS message
+             *
+             ******************/
+
+            // Do we even need to send ou status ? We could just disconnect from here
+
+            info!(target: &target,
+                "Sending STATUS message",
+            );
+
+            let genesis_hash = [
+                212, 229, 103, 64, 248, 118, 174, 248, 192, 16, 184, 106, 64, 213, 245, 103, 69,
+                161, 24, 208, 144, 106, 52, 230, 154, 236, 140, 13, 177, 203, 143, 163,
+            ];
+
+            let status = message::Status {
+                version,
+                network_id: 1, // TODO: allow to do random networks
+                td: vec![0],
+                blockhash: genesis_hash.to_vec(),
+                genesis: genesis_hash.to_vec(),
+                fork_id: (vec![159, 61, 34, 84], 0),
+            };
+
+            // Send STATUS message
+            let status = message::create_status_message(status);
+            utils::send_message(status, &mut stream, &mut egress_mac, &mut egress_aes);
 
             let cap: Vec<(String, u32)> = serde_json::from_str(&capabilities).unwrap();
             let _result = postgres
                 .execute(
                     &update_statement,
                     &[
-                        &(status.network_id as i64),
-                        &status.fork_id.0,
-                        &status.genesis,
+                        &(their_status.network_id as i64),
+                        &their_status.fork_id.0,
+                        &their_status.genesis,
                         &serde_json::to_value(&cap).unwrap(),
                         &hello_message.client,
                         &remote_id,
